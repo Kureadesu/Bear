@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "11664957546",
+    "project_id": "bear-1c5ec",
+    "storage_bucket": "bear-1c5ec.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:11664957546:android:024acf8165561eb096ea13",
+        "android_client_info": {
+          "package_name": "com.example.bear"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAFZC8MplAKDw4muw5beSOSqH5-moMIJYw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
