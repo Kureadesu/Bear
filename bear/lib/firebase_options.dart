@@ -60,13 +60,14 @@ class DefaultFirebaseOptions {
     projectId: 'bear-1c5ec',
     storageBucket: 'bear-1c5ec.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDNebdn_m6Kh2HVEMFLrnBEpLxFHbIYo8A',
     appId: '1:11664957546:ios:7fd9b090ddf29bb796ea13',
     messagingSenderId: '11664957546',
     projectId: 'bear-1c5ec',
     storageBucket: 'bear-1c5ec.firebasestorage.app',
+    androidClientId: '11664957546-02mh4q2jp4odgp4nmdmaqtdlm4bh24im.apps.googleusercontent.com',
+    iosClientId: '11664957546-i1101tnsp3o6a3q6hhmu1v1vpefbrqi1.apps.googleusercontent.com',
     iosBundleId: 'com.example.bear',
   );
 

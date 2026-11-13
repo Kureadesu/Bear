@@ -2,6 +2,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
+import 'pairing_screen.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'firebase_options.dart';
 
@@ -13,6 +17,41 @@ Future<void> main() async {
   );
 
   runApp(const MainApp());
+}
+
+Future<void>? _googleInitialization;
+
+Future<UserCredential> signInWithGoogle() async {
+  final auth = FirebaseAuth.instance;
+
+  // Browser: keep using Firebase's popup.
+  if (kIsWeb) {
+    final provider = GoogleAuthProvider();
+    provider.setCustomParameters({'prompt': 'select_account'});
+
+    return auth.signInWithPopup(provider);
+  }
+
+  // Native Android/iOS: initialize Google Sign-In once.
+  final googleSignIn = GoogleSignIn.instance;
+
+  await (_googleInitialization ??= googleSignIn.initialize());
+
+  final googleUser = await googleSignIn.authenticate();
+  final idToken = googleUser.authentication.idToken;
+
+  if (idToken == null) {
+    throw FirebaseAuthException(
+      code: 'invalid-credential',
+      message: 'Google did not return an ID token.',
+    );
+  }
+
+  final credential = GoogleAuthProvider.credential(
+    idToken: idToken,
+  );
+
+  return auth.signInWithCredential(credential);
 }
 
 class MainApp extends StatelessWidget {
@@ -52,10 +91,104 @@ class MainApp extends StatelessWidget {
 
           final user = snapshot.data;
           return user == null
-              ? const SignInScreen()
-              : HomeScreen(user: user);
+          ? const SignInScreen()
+          : ProfileGate(
+              key: ValueKey(user.uid),
+              user: user,
+            );
         },
       ),
+    );
+  }
+}
+
+class ProfileGate extends StatefulWidget {
+  const ProfileGate({
+    super.key,
+    required this.user,
+  });
+
+  final User user;
+
+  @override
+  State<ProfileGate> createState() => _ProfileGateState();
+}
+
+class _ProfileGateState extends State<ProfileGate> {
+  late Future<void> _profileSetup;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileSetup = _ensureProfile();
+  }
+
+  Future<void> _ensureProfile() async {
+    final db = FirebaseFirestore.instance;
+    final profileRef = db.collection('users').doc(widget.user.uid);
+
+    await db.runTransaction((transaction) async {
+      final profile = await transaction.get(profileRef);
+
+      // Preserve existing profiles, including their coupleId.
+      if (profile.exists) return;
+
+      transaction.set(profileRef, {
+        'displayName': widget.user.displayName ?? '',
+        'photoUrl': widget.user.photoURL,
+        'coupleId': null,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  void _retry() {
+    setState(() {
+      _profileSetup = _ensureProfile();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _profileSetup,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Bear 🐻')),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'We couldn’t prepare your profile. '
+                      'Check your connection and try again.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _retry,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return HomeScreen(user: widget.user);
+      },
     );
   }
 }
@@ -99,9 +232,7 @@ class _SignInScreenState extends State<SignInScreen> {
       final auth = FirebaseAuth.instance;
 
       if (withGoogle) {
-        final provider = GoogleAuthProvider();
-        provider.setCustomParameters({'prompt': 'select_account'});
-        await auth.signInWithPopup(provider);
+        await signInWithGoogle();
       } else if (_creatingAccount) {
         await auth.createUserWithEmailAndPassword(
           email: _emailController.text.trim(),
@@ -117,6 +248,14 @@ class _SignInScreenState extends State<SignInScreen> {
       if (mounted) {
         setState(() {
           _error = _authErrorMessage(error);
+        });
+      }
+    } on GoogleSignInException catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error.code == GoogleSignInExceptionCode.canceled
+              ? 'Google sign-in was cancelled.'
+              : 'Google sign-in failed (${error.code.name}).';
         });
       }
     } catch (_) {
@@ -352,15 +491,7 @@ class HomeScreen extends StatelessWidget {
           final coupleId = data?['coupleId'];
 
           if (coupleId is! String || coupleId.trim().isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Add your coupleId to your user document in Firestore.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            );
+            return const PairingScreen();
           }
 
           return _SharedSpace(
@@ -476,7 +607,6 @@ class _SharedSpaceState extends State<_SharedSpace> {
       }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -488,6 +618,8 @@ class _SharedSpaceState extends State<_SharedSpace> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                InviteBanner(coupleId: widget.coupleId),
+                
                 Text(
                   'Your little shared space',
                   style: Theme.of(context).textTheme.headlineSmall,
@@ -608,6 +740,107 @@ class _SharedSpaceState extends State<_SharedSpace> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class InviteBanner extends StatelessWidget {
+  const InviteBanner({
+    super.key,
+    required this.coupleId,
+  });
+
+  final String coupleId;
+
+  @override
+  Widget build(BuildContext context) {
+    final inviteRef = FirebaseFirestore.instance
+        .collection('invites')
+        .doc(coupleId);
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: inviteRef.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text('Unable to load your invitation.'),
+          );
+        }
+
+        final invite = snapshot.data?.data();
+
+        // Old manually created couples may not have an invite.
+        if (invite == null || invite['status'] != 'open') {
+          return const SizedBox.shrink();
+        }
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Invite your person 💌',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Share this private code. It can be accepted once '
+                  'before it expires.',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  coupleId,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      try {
+                        await Clipboard.setData(
+                          ClipboardData(text: coupleId),
+                        );
+
+                        if (!context.mounted) return;
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Invite code copied'),
+                          ),
+                        );
+                      } catch (_) {
+                        if (!context.mounted) return;
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Select the code and copy it manually.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Copy code'),
+                  ),
+                ),
+                if (invite['expiresAt'] is Timestamp)
+                  Text(
+                    'Expires: '
+                    '${(invite['expiresAt'] as Timestamp).toDate().toLocal()}',
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
