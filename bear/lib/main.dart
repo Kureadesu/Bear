@@ -3,20 +3,101 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
+
 import 'pairing_screen.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MainApp());
+}
+
+Future<void> setupTestNotifications(BuildContext context) async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Use the Android app for this notification test.'),
+      ),
+    );
+    return;
+  }
+
+  try {
+    final messaging = FirebaseMessaging.instance;
+
+    final settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    if (!context.mounted) return;
+
+    if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+        settings.authorizationStatus != AuthorizationStatus.provisional) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Notifications are disabled. Enable them in Android settings.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final token = await messaging.getToken();
+
+    if (!context.mounted) return;
+
+    if (token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No device token yet. Please try again.')),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Notification test token'),
+          content: SingleChildScrollView(child: SelectableText(token)),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: token));
+
+                if (!dialogContext.mounted) return;
+
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Token copied')));
+              },
+              child: const Text('Copy token'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        );
+      },
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Notification setup failed: $error')),
+    );
+  }
 }
 
 Future<void>? _googleInitialization;
@@ -47,9 +128,7 @@ Future<UserCredential> signInWithGoogle() async {
     );
   }
 
-  final credential = GoogleAuthProvider.credential(
-    idToken: idToken,
-  );
+  final credential = GoogleAuthProvider.credential(idToken: idToken);
 
   return auth.signInWithCredential(credential);
 }
@@ -64,9 +143,7 @@ class MainApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFC87589),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFC87589)),
         scaffoldBackgroundColor: const Color(0xFFFFF7F4),
         inputDecorationTheme: const InputDecorationTheme(
           border: OutlineInputBorder(),
@@ -77,9 +154,7 @@ class MainApp extends StatelessWidget {
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return const Scaffold(
-              body: Center(
-                child: Text('Unable to check your sign-in status.'),
-              ),
+              body: Center(child: Text('Unable to check your sign-in status.')),
             );
           }
 
@@ -91,11 +166,8 @@ class MainApp extends StatelessWidget {
 
           final user = snapshot.data;
           return user == null
-          ? const SignInScreen()
-          : ProfileGate(
-              key: ValueKey(user.uid),
-              user: user,
-            );
+              ? const SignInScreen()
+              : ProfileGate(key: ValueKey(user.uid), user: user);
         },
       ),
     );
@@ -103,10 +175,7 @@ class MainApp extends StatelessWidget {
 }
 
 class ProfileGate extends StatefulWidget {
-  const ProfileGate({
-    super.key,
-    required this.user,
-  });
+  const ProfileGate({super.key, required this.user});
 
   final User user;
 
@@ -155,9 +224,7 @@ class _ProfileGateState extends State<ProfileGate> {
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -465,6 +532,11 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Bear 🐻'),
         actions: [
+          IconButton(
+            tooltip: 'Set up notifications',
+            icon: const Icon(Icons.notifications_outlined),
+            onPressed: () => setupTestNotifications(context),
+          ),
           TextButton(
             onPressed: () => _signOut(context),
             child: const Text('Sign out'),
@@ -506,11 +578,7 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _SharedSpace extends StatefulWidget {
-  const _SharedSpace({
-    super.key,
-    required this.user,
-    required this.coupleId,
-  });
+  const _SharedSpace({super.key, required this.user, required this.coupleId});
 
   final User user;
   final String coupleId;
@@ -552,9 +620,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
   Future<void> _send({required bool missYou}) async {
     if (_sending) return;
 
-    final text = missYou
-        ? 'I miss you 💗'
-        : _noteController.text.trim();
+    final text = missYou ? 'I miss you 💗' : _noteController.text.trim();
 
     if (text.isEmpty || text.length > 2000) {
       setState(() {
@@ -607,6 +673,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
       }
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -619,7 +686,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 InviteBanner(coupleId: widget.coupleId),
-                
+
                 Text(
                   'Your little shared space',
                   style: Theme.of(context).textTheme.headlineSmall,
@@ -642,16 +709,12 @@ class _SharedSpaceState extends State<_SharedSpace> {
                   runSpacing: 8,
                   children: [
                     FilledButton.icon(
-                      onPressed: _sending
-                          ? null
-                          : () => _send(missYou: false),
+                      onPressed: _sending ? null : () => _send(missYou: false),
                       icon: const Icon(Icons.send_outlined),
                       label: const Text('Send note'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _sending
-                          ? null
-                          : () => _send(missYou: true),
+                      onPressed: _sending ? null : () => _send(missYou: true),
                       icon: const Icon(Icons.favorite_outline),
                       label: const Text('I miss you'),
                     ),
@@ -673,8 +736,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
                 const SizedBox(height: 16),
                 const Divider(),
                 Expanded(
-                  child: StreamBuilder<
-                      QuerySnapshot<Map<String, dynamic>>>(
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: _messageStream,
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
@@ -688,9 +750,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
                       }
 
                       if (!snapshot.hasData) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                        return const Center(child: CircularProgressIndicator());
                       }
 
                       final messages = snapshot.data!.docs;
@@ -706,10 +766,8 @@ class _SharedSpaceState extends State<_SharedSpace> {
                         itemBuilder: (context, index) {
                           final message = messages[index].data();
 
-                          final isMine =
-                              message['senderId'] == widget.user.uid;
-                          final isMissYou =
-                              message['type'] == 'miss_you';
+                          final isMine = message['senderId'] == widget.user.uid;
+                          final isMissYou = message['type'] == 'miss_you';
                           final text = message['text'];
 
                           return Card(
@@ -718,16 +776,10 @@ class _SharedSpaceState extends State<_SharedSpace> {
                                 isMissYou
                                     ? Icons.favorite
                                     : Icons.chat_bubble_outline,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary,
+                                color: Theme.of(context).colorScheme.primary,
                               ),
-                              title: Text(
-                                text is String ? text : '',
-                              ),
-                              subtitle: Text(
-                                isMine ? 'You' : 'Your person',
-                              ),
+                              title: Text(text is String ? text : ''),
+                              subtitle: Text(isMine ? 'You' : 'Your person'),
                             ),
                           );
                         },
@@ -745,10 +797,7 @@ class _SharedSpaceState extends State<_SharedSpace> {
 }
 
 class InviteBanner extends StatelessWidget {
-  const InviteBanner({
-    super.key,
-    required this.coupleId,
-  });
+  const InviteBanner({super.key, required this.coupleId});
 
   final String coupleId;
 
@@ -793,10 +842,7 @@ class InviteBanner extends StatelessWidget {
                 const SizedBox(height: 12),
                 SelectableText(
                   coupleId,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 18,
-                  ),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 18),
                 ),
                 const SizedBox(height: 8),
                 Align(
@@ -804,16 +850,12 @@ class InviteBanner extends StatelessWidget {
                   child: TextButton.icon(
                     onPressed: () async {
                       try {
-                        await Clipboard.setData(
-                          ClipboardData(text: coupleId),
-                        );
+                        await Clipboard.setData(ClipboardData(text: coupleId));
 
                         if (!context.mounted) return;
 
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Invite code copied'),
-                          ),
+                          const SnackBar(content: Text('Invite code copied')),
                         );
                       } catch (_) {
                         if (!context.mounted) return;
