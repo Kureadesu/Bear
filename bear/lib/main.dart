@@ -10,7 +10,13 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import 'firebase_options.dart';
+
+import 'package:http/http.dart' as http;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +24,74 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MainApp());
+}
+
+Future<String?> notifyPartner(String messageId) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  if (user == null) {
+    return 'Your note was saved, but you need to sign in to send an alert.';
+  }
+
+  try {
+    final idToken = await user.getIdToken();
+
+    if (idToken == null) {
+      return 'Your note was saved, but notification authentication failed.';
+    }
+
+    final response = await http
+        .post(
+          Uri.parse(
+            'https://bear-notifications.balaba-claire2003.workers.dev/notify',
+          ),
+          headers: {
+            'Authorization': 'Bearer $idToken',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'messageId': messageId}),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    final result = jsonDecode(response.body);
+
+    if (response.statusCode != 200) {
+      return 'Note saved. Alert failed: ${result['error']}';
+    }
+
+    switch (result['status']) {
+      case 'sent':
+      case 'already_attempted':
+        return null;
+      case 'no_devices':
+        return 'Note saved. Your partner has no registered Android device.';
+      default:
+        return 'Note saved, but the push notification could not be sent.';
+    }
+  } catch (_) {
+    return 'Note saved, but the notification service could not be reached.';
+  }
+}
+
+Future<void> saveNotificationToken(String token) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  if (user == null) {
+    throw StateError('Sign in before enabling notifications.');
+  }
+
+  final deviceId = sha256.convert(utf8.encode(token)).toString();
+
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(user.uid)
+      .collection('devices')
+      .doc(deviceId)
+      .set({
+        'token': token,
+        'platform': 'android',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 }
 
 Future<void> setupTestNotifications(BuildContext context) async {
@@ -63,6 +137,9 @@ Future<void> setupTestNotifications(BuildContext context) async {
       );
       return;
     }
+    await saveNotificationToken(token);
+
+    if (!context.mounted) return;
 
     await showDialog<void>(
       context: context,
@@ -635,12 +712,13 @@ class _SharedSpaceState extends State<_SharedSpace> {
     });
 
     try {
-      await _messages.add({
+      final messageRef = await _messages.add({
         'senderId': widget.user.uid,
         'type': missYou ? 'miss_you' : 'note',
         'text': text,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      final notificationWarning = await notifyPartner(messageRef.id);
 
       if (!mounted) return;
 
@@ -649,7 +727,11 @@ class _SharedSpaceState extends State<_SharedSpace> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saved to your shared space 💗')),
+        SnackBar(
+          content: Text(
+            notificationWarning ?? 'Saved and notification sent 💗',
+          ),
+        ),
       );
     } on FirebaseException catch (error) {
       if (!mounted) return;
