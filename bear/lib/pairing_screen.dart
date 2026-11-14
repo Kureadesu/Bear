@@ -50,8 +50,8 @@ class _PairingScreenState extends State<PairingScreen> {
       if (mounted) {
         setState(() {
           _error = error.code == 'permission-denied'
-              ? 'This invitation is unavailable, or the pairing rules '
-                    'have not been published.'
+              ? 'This invitation is unavailable. Please check the code '
+                    'and try again.'
               : 'Could not connect (${error.code}). Please try again.';
         });
       }
@@ -72,19 +72,6 @@ class _PairingScreenState extends State<PairingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // final ancestors = <String>[];
-
-    // context.visitAncestorElements((element) {
-    //   ancestors.add(element.widget.runtimeType.toString());
-    //   return true;
-    // });
-
-    // debugPrint('PAIRING ANCESTORS: ${ancestors.join(' → ')}');
-
-    // debugPrint(
-    //   'HAS MATERIAL LOCALIZATIONS: '
-    //   '${Localizations.of<MaterialLocalizations>(context, MaterialLocalizations) != null}',
-    // );
     return Material(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Center(

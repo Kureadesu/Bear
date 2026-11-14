@@ -49,9 +49,7 @@ class PairingService {
         ),
       });
 
-      transaction.update(profileRef, {
-        'coupleId': coupleRef.id,
-      });
+      transaction.update(profileRef, {'coupleId': coupleRef.id});
     });
 
     return coupleRef.id;
@@ -108,9 +106,7 @@ class PairingService {
       final members = couple.data()?['memberIds'];
       final ownerId = inviteData['ownerId'];
 
-      if (members is! List ||
-          members.length != 1 ||
-          members.first != ownerId) {
+      if (members is! List || members.length != 1 || members.first != ownerId) {
         throw StateError('That shared space is no longer available.');
       }
 
@@ -118,14 +114,9 @@ class PairingService {
         'memberIds': [ownerId, uid],
       });
 
-      transaction.update(inviteRef, {
-        'status': 'accepted',
-        'acceptedBy': uid,
-      });
+      transaction.update(inviteRef, {'status': 'accepted', 'acceptedBy': uid});
 
-      transaction.update(profileRef, {
-        'coupleId': code,
-      });
+      transaction.update(profileRef, {'coupleId': code});
     });
   }
 }
